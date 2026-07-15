@@ -26,27 +26,22 @@ if not BOT_TOKEN:
 # Dictionary to store reminders
 user_reminders = {}
 
-# Helper function to parse time
 def parse_time(text):
+    """Parse time from various formats"""
     text = text.lower().strip()
     
-    match = re.match(r'^(\d{1,2}):(\d{2})$', text)
+    # Handle: "10:30", "10:30am", "10:30 pm"
+    match = re.match(r'^(\d{1,2}):(\d{2})\s*(am|pm)?$', text)
     if match:
-        hour, minute = int(match.group(1)), int(match.group(2))
-        if 0 <= hour <= 23 and 0 <= minute <= 59:
-            now = datetime.now()
-            reminder_time = datetime(now.year, now.month, now.day, hour, minute)
-            if reminder_time < now:
-                reminder_time += timedelta(days=1)
-            return reminder_time
-    
-    match = re.match(r'^(\d{1,2}):(\d{2})\s*(am|pm)$', text)
-    if match:
-        hour, minute, period = int(match.group(1)), int(match.group(2)), match.group(3)
+        hour = int(match.group(1))
+        minute = int(match.group(2))
+        period = match.group(3) if match.group(3) else None
+        
         if period == 'pm' and hour != 12:
             hour += 12
         elif period == 'am' and hour == 12:
             hour = 0
+            
         if 0 <= hour <= 23 and 0 <= minute <= 59:
             now = datetime.now()
             reminder_time = datetime(now.year, now.month, now.day, hour, minute)
@@ -54,13 +49,17 @@ def parse_time(text):
                 reminder_time += timedelta(days=1)
             return reminder_time
     
+    # Handle: "2pm", "10am"
     match = re.match(r'^(\d{1,2})\s*(am|pm)$', text)
     if match:
-        hour, period = int(match.group(1)), match.group(2)
+        hour = int(match.group(1))
+        period = match.group(2)
+        
         if period == 'pm' and hour != 12:
             hour += 12
         elif period == 'am' and hour == 12:
             hour = 0
+            
         if 0 <= hour <= 23:
             now = datetime.now()
             reminder_time = datetime(now.year, now.month, now.day, hour, 0)
@@ -70,15 +69,15 @@ def parse_time(text):
     
     return None
 
-# Command: /start
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     welcome_message = (
         "🤖 *Welcome to Reminder Bot!*\n\n"
         "I can help you remember important tasks.\n\n"
         "*Available Commands:*\n"
-        "/remind <time> <description> - Set a reminder\n"
+        "/remind - Show your full schedule\n"
+        "/remind <time> <description> - Set a new reminder\n"
         "  Examples:\n"
-        "  /remind 10:00 Meeting with team\n"
+        "  /remind 10:30 Meeting with team\n"
         "  /remind 2pm Call mom\n"
         "  /remind 15:30 Submit report\n\n"
         "/myreminders - Show all your reminders\n"
@@ -87,33 +86,62 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
     await update.message.reply_text(welcome_message, parse_mode='Markdown')
 
-# Command: /help
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     help_text = (
         "📚 *How to use this bot:*\n\n"
-        "1️⃣ *Set a reminder:*\n"
-        "   `/remind 10:00 Buy groceries`\n"
-        "   `/remind 2pm Call John`\n"
-        "   `/remind 15:30 Submit report`\n\n"
-        "2️⃣ *View reminders:* `/myreminders`\n\n"
-        "3️⃣ *Cancel a reminder:* `/cancel 1`\n\n"
-        "4️⃣ *Start over:* `/start`"
+        "1️⃣ *View your schedule:* `/remind`\n"
+        "2️⃣ *Set a reminder:* `/remind 10:30 Buy groceries`\n"
+        "3️⃣ *View reminders:* `/myreminders`\n"
+        "4️⃣ *Cancel a reminder:* `/cancel 1`\n\n"
+        "⏰ *Time Formats:*\n"
+        "- `10:30` (24-hour)\n"
+        "- `2pm` (12-hour)\n"
+        "- `2:30pm` (12-hour with minutes)\n\n"
+        "📝 *Example:* `/remind 2pm Call John`"
     )
     await update.message.reply_text(help_text, parse_mode='Markdown')
 
-# Command: /remind
 async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_text = update.message.text
     
+    # Check if user just sent /remind without any arguments
+    parts = user_text.split(maxsplit=1)
+    
+    # If only /remind was sent (no arguments), show all reminders
+    if len(parts) == 1:
+        if chat_id not in user_reminders or not user_reminders[chat_id]:
+            await update.message.reply_text(
+                "📭 *No reminders scheduled.*\n\n"
+                "Set one using: `/remind 10:30 Task description`",
+                parse_mode='Markdown'
+            )
+            return
+        
+        reminders = user_reminders[chat_id]
+        reminder_list = []
+        
+        for idx, reminder in enumerate(reminders, 1):
+            time_str = reminder['time'].strftime('%I:%M %p').lstrip('0')
+            reminder_list.append(f"{idx}. {reminder['text']} - ⏰ {time_str}")
+        
+        response = "📋 *Your Full Schedule:*\n\n" + "\n".join(reminder_list)
+        response += "\n\nTo cancel a reminder, use: `/cancel <number>`"
+        
+        await update.message.reply_text(response, parse_mode='Markdown')
+        return
+    
+    # If user provided time and description, set a new reminder
     parts = user_text.split(maxsplit=2)
+    
     if len(parts) < 3:
         await update.message.reply_text(
             "⚠️ *Please specify time and description.*\n\n"
             "Format: `/remind <time> <description>`\n"
             "Examples:\n"
-            "- `/remind 10:00 Meeting with team`\n"
-            "- `/remind 2pm Call mom`",
+            "- `/remind 10:30 Meeting with team`\n"
+            "- `/remind 2pm Call mom`\n\n"
+            "Or just type `/remind` to see your schedule.",
             parse_mode='Markdown'
         )
         return
@@ -127,7 +155,7 @@ async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(
             "⚠️ *Invalid time format.*\n\n"
             "Try formats like:\n"
-            "- `10:00` (24-hour)\n"
+            "- `10:30` (24-hour)\n"
             "- `2pm` (12-hour)\n"
             "- `2:30pm` (12-hour with minutes)",
             parse_mode='Markdown'
@@ -162,15 +190,24 @@ async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     time_formatted = reminder_time.strftime('%I:%M %p').lstrip('0')
     
-    await update.message.reply_text(
+    # Show the new reminder AND the full schedule
+    reminders = user_reminders[chat_id]
+    reminder_list = []
+    
+    for idx, reminder in enumerate(reminders, 1):
+        time_str = reminder['time'].strftime('%I:%M %p').lstrip('0')
+        reminder_list.append(f"{idx}. {reminder['text']} - ⏰ {time_str}")
+    
+    response = (
         f"✅ *Reminder set!*\n\n"
         f"📝 *Task:* {description}\n"
         f"⏰ *Time:* {time_formatted}\n\n"
-        f"I'll remind you at the scheduled time.",
-        parse_mode='Markdown'
+        f"📋 *Your Full Schedule:*\n\n"
+        + "\n".join(reminder_list)
     )
+    
+    await update.message.reply_text(response, parse_mode='Markdown')
 
-# Function to send reminder
 async def send_reminder(context: ContextTypes.DEFAULT_TYPE):
     job = context.job
     chat_id = job.chat_id
@@ -188,7 +225,6 @@ async def send_reminder(context: ContextTypes.DEFAULT_TYPE):
     if chat_id in user_reminders:
         user_reminders[chat_id] = [r for r in user_reminders[chat_id] if r['job_name'] != job.name]
 
-# Command: /myreminders
 async def myreminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     
@@ -208,7 +244,6 @@ async def myreminders(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     await update.message.reply_text(response, parse_mode='Markdown')
 
-# Command: /cancel
 async def cancel_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_text = update.message.text
@@ -247,7 +282,6 @@ async def cancel_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
 
-# Handle unknown commands
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "❌ Unknown command.\n\n"
@@ -255,7 +289,6 @@ async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
 
-# Handle unknown text
 async def unknown_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text(
         "❌ I don't understand that.\n\n"
@@ -263,21 +296,17 @@ async def unknown_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
 
-# Main function
 def main():
     print("🤖 Starting Reminder Bot...")
     
-    # Create application
     app = Application.builder().token(BOT_TOKEN).build()
     
-    # Add command handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("remind", remind))
     app.add_handler(CommandHandler("myreminders", myreminders))
     app.add_handler(CommandHandler("cancel", cancel_reminder))
     
-    # Handle unknown commands and text
     app.add_handler(MessageHandler(filters.COMMAND, unknown))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown_text))
     
@@ -285,7 +314,6 @@ def main():
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
-    # Start Flask server for Render
     def run_flask():
         flask_app.run(host='0.0.0.0', port=10000)
     
@@ -293,5 +321,4 @@ if __name__ == "__main__":
     flask_thread.daemon = True
     flask_thread.start()
     
-    # Run the bot
     main()
