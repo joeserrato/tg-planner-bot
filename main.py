@@ -105,9 +105,6 @@ async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_text = update.message.text
     
-    # Debug
-    print(f"Debug: Received: {user_text}")
-    
     # Check if user just sent /remind without any arguments
     parts = user_text.split(maxsplit=1)
     
@@ -152,11 +149,7 @@ async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     time_str = parts[1]
     description = parts[2]
     
-    print(f"Debug: Time: '{time_str}', Description: '{description}'")
-    
     reminder_time = parse_time(time_str)
-    
-    print(f"Debug: Parsed: {reminder_time}")
     
     if not reminder_time:
         await update.message.reply_text(
@@ -175,6 +168,15 @@ async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     
     if time_diff <= 0:
         await update.message.reply_text("⚠️ Time must be in the future!")
+        return
+    
+    # Check if job_queue is available
+    if context.job_queue is None:
+        await update.message.reply_text(
+            "⚠️ *Error:* JobQueue is not available.\n\n"
+            "Please install: `pip install python-telegram-bot[job-queue]`",
+            parse_mode='Markdown'
+        )
         return
     
     job_name = f"reminder_{chat_id}_{len(user_reminders.get(chat_id, []))}"
@@ -307,14 +309,22 @@ async def unknown_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
 def main():
     print("🤖 Starting Reminder Bot...")
     
+    # Build the application
     app = Application.builder().token(BOT_TOKEN).build()
     
+    # Check if job_queue is available
+    if app.job_queue is None:
+        print("⚠️ JobQueue is not available! Please install python-telegram-bot[job-queue]")
+        return
+    
+    # Add command handlers
     app.add_handler(CommandHandler("start", start))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("remind", remind))
     app.add_handler(CommandHandler("myreminders", myreminders))
     app.add_handler(CommandHandler("cancel", cancel_reminder))
     
+    # Handle unknown commands and text
     app.add_handler(MessageHandler(filters.COMMAND, unknown))
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown_text))
     
