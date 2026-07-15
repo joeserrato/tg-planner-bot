@@ -30,18 +30,18 @@ def parse_time(text):
     """Parse time from various formats"""
     text = text.lower().strip()
     
-    # Handle: "10:30", "10:30am", "10:30 pm"
+    # Format: 10:30, 10:30am, 10:30 pm
     match = re.match(r'^(\d{1,2}):(\d{2})\s*(am|pm)?$', text)
     if match:
         hour = int(match.group(1))
         minute = int(match.group(2))
-        period = match.group(3) if match.group(3) else None
+        period = match.group(3)
         
         if period == 'pm' and hour != 12:
             hour += 12
         elif period == 'am' and hour == 12:
             hour = 0
-            
+        
         if 0 <= hour <= 23 and 0 <= minute <= 59:
             now = datetime.now()
             reminder_time = datetime(now.year, now.month, now.day, hour, minute)
@@ -49,7 +49,7 @@ def parse_time(text):
                 reminder_time += timedelta(days=1)
             return reminder_time
     
-    # Handle: "2pm", "10am"
+    # Format: 2pm, 10am
     match = re.match(r'^(\d{1,2})\s*(am|pm)$', text)
     if match:
         hour = int(match.group(1))
@@ -59,7 +59,7 @@ def parse_time(text):
             hour += 12
         elif period == 'am' and hour == 12:
             hour = 0
-            
+        
         if 0 <= hour <= 23:
             now = datetime.now()
             reminder_time = datetime(now.year, now.month, now.day, hour, 0)
@@ -105,6 +105,9 @@ async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_text = update.message.text
     
+    # Debug
+    print(f"Debug: Received: {user_text}")
+    
     # Check if user just sent /remind without any arguments
     parts = user_text.split(maxsplit=1)
     
@@ -131,7 +134,7 @@ async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(response, parse_mode='Markdown')
         return
     
-    # If user provided time and description, set a new reminder
+    # If user provided time and description
     parts = user_text.split(maxsplit=2)
     
     if len(parts) < 3:
@@ -149,11 +152,16 @@ async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     time_str = parts[1]
     description = parts[2]
     
+    print(f"Debug: Time: '{time_str}', Description: '{description}'")
+    
     reminder_time = parse_time(time_str)
+    
+    print(f"Debug: Parsed: {reminder_time}")
     
     if not reminder_time:
         await update.message.reply_text(
-            "⚠️ *Invalid time format.*\n\n"
+            f"⚠️ *Invalid time format.*\n\n"
+            f"I couldn't understand '{time_str}'.\n\n"
             "Try formats like:\n"
             "- `10:30` (24-hour)\n"
             "- `2pm` (12-hour)\n"
