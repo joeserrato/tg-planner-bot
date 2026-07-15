@@ -1,9 +1,18 @@
 import os
 import re
+import threading
 from datetime import datetime, timedelta
 from dotenv import load_dotenv
 from telegram import Update
 from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+from flask import Flask
+
+# Flask server for Render
+flask_app = Flask(__name__)
+
+@flask_app.route('/')
+def health():
+    return "Bot is running!", 200
 
 # Load environment variables
 load_dotenv()
@@ -15,15 +24,12 @@ if not BOT_TOKEN:
     raise ValueError("No BOT_TOKEN found! Make sure it's set in environment variables.")
 
 # Dictionary to store reminders
-# Format: {chat_id: [{'time': datetime, 'text': str, 'job_name': str}]}
 user_reminders = {}
 
-# Helper function to parse time from text
+# Helper function to parse time
 def parse_time(text):
-    """Parse time from various formats like '10:00', '10am', '2pm', '15:30'"""
     text = text.lower().strip()
     
-    # Try HH:MM format (24-hour)
     match = re.match(r'^(\d{1,2}):(\d{2})$', text)
     if match:
         hour, minute = int(match.group(1)), int(match.group(2))
@@ -34,7 +40,6 @@ def parse_time(text):
                 reminder_time += timedelta(days=1)
             return reminder_time
     
-    # Try X:XX AM/PM format
     match = re.match(r'^(\d{1,2}):(\d{2})\s*(am|pm)$', text)
     if match:
         hour, minute, period = int(match.group(1)), int(match.group(2)), match.group(3)
@@ -49,7 +54,6 @@ def parse_time(text):
                 reminder_time += timedelta(days=1)
             return reminder_time
     
-    # Try X AM/PM format
     match = re.match(r'^(\d{1,2})\s*(am|pm)$', text)
     if match:
         hour, period = int(match.group(1)), match.group(2)
@@ -102,7 +106,6 @@ async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_text = update.message.text
     
-    # Check if user provided time and description
     parts = user_text.split(maxsplit=2)
     if len(parts) < 3:
         await update.message.reply_text(
@@ -118,7 +121,6 @@ async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
     time_str = parts[1]
     description = parts[2]
     
-    # Parse time
     reminder_time = parse_time(time_str)
     
     if not reminder_time:
@@ -132,7 +134,6 @@ async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
         return
     
-    # Calculate time difference
     now = datetime.now()
     time_diff = (reminder_time - now).total_seconds()
     
@@ -140,10 +141,8 @@ async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("⚠️ Time must be in the future!")
         return
     
-    # Create job name
     job_name = f"reminder_{chat_id}_{len(user_reminders.get(chat_id, []))}"
     
-    # Add job to job queue
     job = context.job_queue.run_once(
         send_reminder,
         when=time_diff,
@@ -152,7 +151,6 @@ async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
         data={'text': description, 'time': reminder_time}
     )
     
-    # Store reminder in memory
     if chat_id not in user_reminders:
         user_reminders[chat_id] = []
     user_reminders[chat_id].append({
@@ -162,7 +160,6 @@ async def remind(update: Update, context: ContextTypes.DEFAULT_TYPE):
         'job': job
     })
     
-    # Format time for display
     time_formatted = reminder_time.strftime('%I:%M %p').lstrip('0')
     
     await update.message.reply_text(
@@ -188,7 +185,6 @@ async def send_reminder(context: ContextTypes.DEFAULT_TYPE):
         parse_mode='Markdown'
     )
     
-    # Remove from memory after reminder is sent
     if chat_id in user_reminders:
         user_reminders[chat_id] = [r for r in user_reminders[chat_id] if r['job_name'] != job.name]
 
@@ -217,7 +213,6 @@ async def cancel_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.effective_chat.id
     user_text = update.message.text
     
-    # Parse the number
     parts = user_text.split()
     if len(parts) != 2:
         await update.message.reply_text(
@@ -239,13 +234,11 @@ async def cancel_reminder(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("❌ Reminder not found.\n\nUse `/myreminders` to see your reminders.", parse_mode='Markdown')
         return
     
-    # Remove the job
     reminder = user_reminders[chat_id][idx]
     job = reminder.get('job')
     if job:
         job.schedule_removal()
     
-    # Remove from memory
     removed = user_reminders[chat_id].pop(idx)
     
     await update.message.reply_text(
@@ -292,4 +285,13 @@ def main():
     app.run_polling(allowed_updates=Update.ALL_TYPES)
 
 if __name__ == "__main__":
+    # Start Flask server for Render
+    def run_flask():
+        flask_app.run(host='0.0.0.0', port=10000)
+    
+    flask_thread = threading.Thread(target=run_flask)
+    flask_thread.daemon = True
+    flask_thread.start()
+    
+    # Run the bot
     main()
